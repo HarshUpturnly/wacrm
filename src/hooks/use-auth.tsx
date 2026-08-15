@@ -203,11 +203,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         const error = result.error;
-        console.error("[AuthProvider] fetchProfile error:", {
-          message: error.message,
-          details: error.details,
-          hint: error.hint,
-          code: error.code,
+        // Log the raw error plus a safe object with known fields. Some
+        // runtimes (or network/Fetch errors) may yield an error object
+        // without enumerable properties, so include a JSON fallback to
+        // ensure the log is informative during debugging.
+        const _err: any = error;
+        let serialized = null;
+        try {
+          serialized = JSON.stringify(_err);
+        } catch (_) {
+          serialized = String(_err);
+        }
+        console.error("[AuthProvider] fetchProfile error:", _err, {
+          message: _err?.message ?? serialized,
+          details: _err?.details ?? null,
+          hint: _err?.hint ?? null,
+          code: _err?.code ?? null,
+          _serialized: serialized,
         });
         // One hiccup here used to lock the session read-only for good:
         // the profile stayed null, so every `useCan` gate answered
