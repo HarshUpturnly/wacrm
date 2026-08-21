@@ -84,6 +84,8 @@ function SettingsPageInner() {
     fields: <FieldsAndTagsPanel />,
     deals: <DealsSettings />,
     members: <MembersTab />,
+    products: <ProductsSettings />,
+    payments: <PaymentGatewaysSettings />,
     api: <ApiKeysSettings />,
   };
 
