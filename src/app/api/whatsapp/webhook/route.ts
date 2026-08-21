@@ -300,6 +300,7 @@ export async function POST(request: Request) {
 }
 
 async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
+  console.debug('[webhook-debug] processWebhook invoked, entries:', (body.entry||[]).length)
   if (!body.entry) return
 
   for (const entry of body.entry) {
@@ -768,6 +769,7 @@ async function processMessage(
   // ONLY on a genuine first insert — an empty result means this delivery
   // was a replay. This is the single idempotency boundary that must sit
   // BEFORE the unread bump and all downstream fan-out below (issue #367).
+  console.debug('[webhook-debug] upsert messages about to run for meta id', message.id)
   const { data: insertedRows, error: msgError } = await supabaseAdmin()
     .from('messages')
     .upsert(
