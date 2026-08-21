@@ -114,15 +114,6 @@ export function ContactForm({
     }
   }
 
-  async function fetchTags() {
-    setLoadingTags(true);
-    const { data } = await supabase
-      .from('tags')
-      .select('*')
-      .order('name');
-    if (data) setTags(data);
-    setLoadingTags(false);
-  }
 
   function toggleTag(tagId: string) {
     setSelectedTagIds((prev) =>
