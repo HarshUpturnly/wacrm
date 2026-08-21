@@ -23,6 +23,10 @@ export interface InstagramKeywordRule {
   match_type: InstagramKeywordMatchMode;
   trigger_type: InstagramKind | 'both';
   is_active: boolean;
+  // Optional: explicit WhatsApp link to send back to the user
+  whatsapp_link?: string | null;
+  // Optional: product reference for product-linked keyword rules
+  product_id?: string | null;
 }
 
 export function normalizeInstagramText(value: string): string {
