@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent, type ChangeEvent } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -74,7 +74,7 @@ export function PaymentGatewaysSettings() {
         <form className="space-y-4" onSubmit={handleCreate}>
           <div>
             <Label htmlFor="gateway-provider">Provider</Label>
-            <select id="gateway-provider" value={provider} onChange={(e) => setProvider(e.target.value as any)} className="h-10 rounded-md border border-input bg-background px-3 text-sm">
+            <select id="gateway-provider" value={provider} onChange={(e: ChangeEvent<HTMLSelectElement>) => setProvider(e.target.value as Gateway['provider'])} className="h-10 rounded-md border border-input bg-background px-3 text-sm">
               <option value="stripe">Stripe</option>
               <option value="payu">PayU</option>
               <option value="razorpay">Razorpay</option>

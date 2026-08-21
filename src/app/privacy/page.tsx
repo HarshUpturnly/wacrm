@@ -37,8 +37,7 @@ export default function PrivacyPage() {
         <h2 className="text-xl font-semibold mb-2">Cookies and tracking</h2>
         <p className="text-sm">
           We use cookies and similar technologies for authentication, session management, and analytics. You can
-          control cookies through your browser settings; disabling certain cookies could affect the site's
-          functionality.
+          control cookies through your browser settings; disabling certain cookies could affect the site&apos;s functionality.
         </p>
       </section>
 

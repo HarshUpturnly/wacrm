@@ -190,23 +190,35 @@ export async function POST(request: Request) {
   if (stripeSig) {
     try {
       const parsed = JSON.parse(rawBody)
-      const ev = parsed as any
-      // Handle checkout / payment succeeded events
-      if (ev && (ev.type === 'checkout.session.completed' || ev.type === 'payment_intent.succeeded')) {
-        const obj = ev.data?.object || {}
-        const metadata = obj.metadata || {}
-        const productId = metadata.product_id || metadata.product || null
-        const contactPhone = metadata.contact_phone || metadata.contactPhone || null
-        const accountId = metadata.account_id || metadata.account || null
-
-        if (productId && contactPhone) {
-          try {
-            const admin = supabaseAdmin()
-            const { data: product } = await admin.from('products').select('*').eq('id', productId).maybeSingle()
-            if (!product) {
-              console.warn('[stripe-webhook] product not found', productId)
-              return NextResponse.json({ ok: true })
+      const ev: unknown = parsed
+      // Handle checkout / payment succeeded events — narrow unknown safely
+      if (typeof ev === 'object' && ev !== null) {
+        const evTyped = ev as { type?: string; data?: { object?: Record<string, unknown> } };
+        if (evTyped.type === 'checkout.session.completed' || evTyped.type === 'payment_intent.succeeded') {
+          const obj = evTyped.data?.object
+          // Safely extract metadata fields without using `any`.
+          const metadata: Record<string, string> = {}
+          if (obj && typeof obj === 'object') {
+            const potential = (obj as Record<string, unknown>)['metadata']
+            if (potential && typeof potential === 'object') {
+              for (const [k, v] of Object.entries(potential as Record<string, unknown>)) {
+                metadata[k] = v == null ? '' : String(v)
+              }
             }
+          }
+
+          const productId = metadata.product_id || metadata.product || null
+          const contactPhone = metadata.contact_phone || metadata.contactPhone || null
+          const accountId = metadata.account_id || metadata.account || null
+
+          if (productId && contactPhone) {
+            try {
+              const admin = supabaseAdmin()
+              const { data: product } = await admin.from('products').select('*').eq('id', productId).maybeSingle()
+              if (!product) {
+                console.warn('[stripe-webhook] product not found', productId)
+                return NextResponse.json({ ok: true })
+              }
 
             const acct = accountId || product.account_id
             if (!acct) {
