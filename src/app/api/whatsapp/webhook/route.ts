@@ -190,13 +190,12 @@ export async function POST(request: Request) {
   if (stripeSig) {
     try {
       const parsed = JSON.parse(rawBody)
-      const ev: unknown = parsed
-      // Handle checkout / payment succeeded events — narrow unknown safely
+      const ev = parsed as unknown
       if (typeof ev === 'object' && ev !== null) {
-        const evTyped = ev as { type?: string; data?: { object?: Record<string, unknown> } };
-        if (evTyped.type === 'checkout.session.completed' || evTyped.type === 'payment_intent.succeeded') {
+        const evTyped = ev as { type?: string; data?: { object?: Record<string, unknown> } }
+        const evType = evTyped.type
+        if (evType === 'checkout.session.completed' || evType === 'payment_intent.succeeded') {
           const obj = evTyped.data?.object
-          // Safely extract metadata fields without using `any`.
           const metadata: Record<string, string> = {}
           if (obj && typeof obj === 'object') {
             const potential = (obj as Record<string, unknown>)['metadata']
@@ -207,45 +206,34 @@ export async function POST(request: Request) {
             }
           }
 
-          const productId = metadata.product_id || metadata.product || null
-          const contactPhone = metadata.contact_phone || metadata.contactPhone || null
-          const accountId = metadata.account_id || metadata.account || null
+          const productId = metadata.product_id || metadata.product || ''
+          const contactPhone = metadata.contact_phone || metadata.contactPhone || ''
+          const accountId = metadata.account_id || metadata.account || ''
 
           if (productId && contactPhone) {
-            try {
-              const admin = supabaseAdmin()
-              const { data: product } = await admin.from('products').select('*').eq('id', productId).maybeSingle()
-              if (!product) {
-                console.warn('[stripe-webhook] product not found', productId)
-                return NextResponse.json({ ok: true })
-              }
-
-            const acct = accountId || product.account_id;
-            if (!acct) {
-              console.warn('[stripe-webhook] cannot determine account for delivery');
-              return NextResponse.json({ ok: true });
-            }
-
-            const { data: waCfg } = await admin.from('whatsapp_config').select('phone_number_id, access_token').eq('account_id', acct).maybeSingle()
-            if (!waCfg) {
-              console.warn('[stripe-webhook] no whatsapp_config for account', acct)
-              return NextResponse.json({ ok: true })
-            }
-
-            const accessToken = decrypt(waCfg.access_token)
-            // Determine media kind from file extension (document) — use 'document' by default
-            const link = product.file_public_url || ''
-            const filename = product.file_path ? product.file_path.split('/').pop() : undefined
-            if (link) {
-              try {
-                await sendMediaMessage({ phoneNumberId: waCfg.phone_number_id, accessToken, to: contactPhone, kind: 'document', link, filename })
-                console.log('[stripe-webhook] delivered product', productId, 'to', contactPhone)
-              } catch (err) {
-                console.error('[stripe-webhook] failed to send media:', err)
+            const admin = supabaseAdmin()
+            const { data: product } = await admin.from('products').select('*').eq('id', productId).maybeSingle()
+            if (!product) {
+              console.warn('[stripe-webhook] product not found', productId)
+            } else {
+              const acct = accountId || product.account_id
+              if (acct) {
+                const { data: waCfg } = await admin.from('whatsapp_config').select('phone_number_id, access_token').eq('account_id', acct).maybeSingle()
+                if (waCfg) {
+                  try {
+                    const accessToken = decrypt(waCfg.access_token)
+                    const link = product.file_public_url || ''
+                    const filename = product.file_path ? product.file_path.split('/').pop() : undefined
+                    if (link) {
+                      await sendMediaMessage({ phoneNumberId: waCfg.phone_number_id, accessToken, to: contactPhone, kind: 'document', link, filename })
+                      console.log('[stripe-webhook] delivered product', productId, 'to', contactPhone)
+                    }
+                  } catch (err) {
+                    console.error('[stripe-webhook] failed to deliver product:', err)
+                  }
+                }
               }
             }
-          } catch (err) {
-            console.error('[stripe-webhook] error delivering product:', err)
           }
         }
       }
@@ -438,10 +426,10 @@ function isValidStatusTransition(current: string, incoming: string): boolean {
 }
 
 async function handleStatusUpdate(status: {
-  id: string
-  status: string
-  timestamp: string
-  recipient_id: string
+  id: string;
+  status: string;
+  timestamp: string;
+  recipient_id: string;
 }) {
   // 1) Mirror onto messages (legacy behavior) — Meta's status values
   //    already match the CHECK constraint on messages.status. No
