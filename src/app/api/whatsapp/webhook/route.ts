@@ -220,10 +220,10 @@ export async function POST(request: Request) {
                 return NextResponse.json({ ok: true })
               }
 
-            const acct = accountId || product.account_id
+            const acct = accountId || product.account_id;
             if (!acct) {
-              console.warn('[stripe-webhook] cannot determine account for delivery')
-              return NextResponse.json({ ok: true })
+              console.warn('[stripe-webhook] cannot determine account for delivery');
+              return NextResponse.json({ ok: true });
             }
 
             const { data: waCfg } = await admin.from('whatsapp_config').select('phone_number_id, access_token').eq('account_id', acct).maybeSingle()
@@ -254,10 +254,10 @@ export async function POST(request: Request) {
     }
 
     // Ack Stripe immediately
-    return NextResponse.json({ ok: true })
+    return NextResponse.json({ ok: true });
   }
 
-  const signature = request.headers.get('x-hub-signature-256')
+  const signature = request.headers.get('x-hub-signature-256');
 
   if (!verifyMetaWebhookSignature(rawBody, signature)) {
     // 401 (not 200) — we want Meta's delivery dashboard to show failures
@@ -267,11 +267,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
   }
 
-  let body: { entry?: WhatsAppWebhookEntry[] }
+  let body: { entry?: WhatsAppWebhookEntry[] };
   try {
-    body = JSON.parse(rawBody)
+    body = JSON.parse(rawBody);
   } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
+    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
   // Process AFTER the response so we ack Meta within their ~20s timeout
