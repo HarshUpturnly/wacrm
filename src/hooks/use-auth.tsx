@@ -207,18 +207,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // runtimes (or network/Fetch errors) may yield an error object
         // without enumerable properties, so include a JSON fallback to
         // ensure the log is informative during debugging.
-        const _err: any = error;
+        const _err: unknown = error;
         let serialized = null;
         try {
           serialized = JSON.stringify(_err);
         } catch (_) {
           serialized = String(_err);
         }
-        console.error("[AuthProvider] fetchProfile error:", _err, {
-          message: _err?.message ?? serialized,
-          details: _err?.details ?? null,
-          hint: _err?.hint ?? null,
-          code: _err?.code ?? null,
+        // Narrow the unknown to access common fields for structured logging
+        const errObj = (error as { message?: string; details?: string; hint?: string; code?: string | number } | null) ?? null;
+        console.error("[AuthProvider] fetchProfile error:", errObj ?? _err, {
+          message: errObj?.message ?? serialized,
+          details: errObj?.details ?? null,
+          hint: errObj?.hint ?? null,
+          code: errObj?.code ?? null,
           _serialized: serialized,
         });
         // One hiccup here used to lock the session read-only for good:

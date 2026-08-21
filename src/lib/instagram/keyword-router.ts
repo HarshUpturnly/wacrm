@@ -1,5 +1,8 @@
 import { createClient } from '@/lib/supabase/server';
 import { runAutomationsForTrigger } from '@/lib/automations/engine';
+import { sendInstagramDm } from '@/lib/instagram/sender';
+import { decrypt } from '@/lib/whatsapp/encryption';
+import { verifyPhoneNumber } from '@/lib/whatsapp/meta-api';
 
 export type InstagramKind = 'dm' | 'comment';
 
@@ -20,6 +23,10 @@ export interface InstagramKeywordRule {
   match_type: InstagramKeywordMatchMode;
   trigger_type: InstagramKind | 'both';
   is_active: boolean;
+  // Optional: explicit WhatsApp link to send back to the user
+  whatsapp_link?: string | null;
+  // Optional: product reference for product-linked keyword rules
+  product_id?: string | null;
 }
 
 export function normalizeInstagramText(value: string): string {
@@ -123,6 +130,82 @@ export async function dispatchInstagramInbound(event: InstagramInboundEvent): Pr
       },
     },
   });
+
+  // Attempt to build a WhatsApp prefilled link and reply to the Instagram sender
+  try {
+    const supabase = await createClient();
+
+    // Prefer an explicit whatsapp_link on the rule
+    let waLink: string | null = match.whatsapp_link || null;
+
+    // If no explicit link, try to build one from the account's whatsapp config
+    if (!waLink) {
+      const { data: waCfg } = await supabase
+        .from('whatsapp_config')
+        .select('phone_number_id, access_token')
+        .eq('account_id', accountId)
+        .maybeSingle();
+
+      if (waCfg?.phone_number_id && waCfg?.access_token) {
+        try {
+          const accessToken = decrypt(waCfg.access_token as string);
+          const info = await verifyPhoneNumber({ phoneNumberId: waCfg.phone_number_id as string, accessToken });
+          const raw = info.display_phone_number || '';
+          const digits = raw.replace(/\D+/g, '');
+          const prefill = encodeURIComponent(`Hi, I'm interested in ${match.keyword}`);
+          if (digits) waLink = `https://wa.me/${digits}?text=${prefill}`;
+        } catch (err) {
+          console.warn('[instagram] failed to build wa link from whatsapp_config:', err);
+        }
+      }
+    }
+
+    // If the rule references a product, prefer to include that product keyword in prefill
+    if (match.product_id && !waLink) {
+      try {
+        const { data: product } = await supabase.from('products').select('*').eq('id', match.product_id).maybeSingle();
+        if (product) {
+          // If product has its own keyword, include that in the prefill so the inbox webhook can route it
+          const prefill = encodeURIComponent(`BUY ${product.keyword ?? product.name}`);
+
+          const { data: waCfg2 } = await supabase
+            .from('whatsapp_config')
+            .select('phone_number_id, access_token')
+            .eq('account_id', accountId)
+            .maybeSingle();
+
+          if (waCfg2?.phone_number_id && waCfg2?.access_token) {
+            try {
+              const accessToken = decrypt(waCfg2.access_token as string);
+              const info = await verifyPhoneNumber({ phoneNumberId: waCfg2.phone_number_id as string, accessToken });
+              const raw = info.display_phone_number || '';
+              const digits = raw.replace(/\D+/g, '');
+              if (digits) waLink = `https://wa.me/${digits}?text=${prefill}`;
+            } catch (err) {
+              console.warn('[instagram] failed to build wa link for product:', err);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[instagram] product lookup failed:', err);
+      }
+    }
+
+    if (waLink) {
+      // Reply to the Instagram sender with the WhatsApp link so they can click and start the flow
+      try {
+        const { data: igCfg } = await supabase.from('instagram_configs').select('business_account_id, access_token').eq('account_id', accountId).maybeSingle();
+        if (igCfg?.business_account_id && igCfg?.access_token) {
+          const igToken = decrypt(igCfg.access_token as string);
+          await sendInstagramDm({ businessAccountId: igCfg.business_account_id as string, accessToken: igToken, recipientId: event.senderId, text: `Open WhatsApp to continue: ${waLink}` });
+        }
+      } catch (err) {
+        console.warn('[instagram] failed to send DM with wa link:', err);
+      }
+    }
+  } catch (err) {
+    console.warn('[instagram] error while attempting to send wa link on keyword match:', err);
+  }
 
   return true;
 }

@@ -15,6 +15,8 @@ type InstagramRule = {
   match_type: 'contains' | 'exact' | 'word';
   trigger_type: 'dm' | 'comment' | 'both';
   reply_text?: string;
+  product_id?: string | null;
+  whatsapp_link?: string | null;
   is_active?: boolean;
 };
 
@@ -32,6 +34,11 @@ export function InstagramConfig() {
   const [triggerType, setTriggerType] = useState<InstagramRule['trigger_type']>('both');
   const [rules, setRules] = useState<InstagramRule[]>([]);
 
+  // Product / whatsapp link helpers for rule creation
+  const [products, setProducts] = useState<Array<{ id: string; name: string; keyword?: string }>>([]);
+  const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
+  const [whatsappLinkInput, setWhatsappLinkInput] = useState('');
+
   useEffect(() => {
     if (sessionLoading || profileLoading || !user || !accountId) {
       setLoading(false);
@@ -45,7 +52,25 @@ export function InstagramConfig() {
         setBusinessAccountId(payload.config?.business_account_id ?? '');
         setVerifyToken(payload.config?.webhook_verify_token ?? '');
         setAccessToken(payload.config?.access_token ?? '');
-        setRules((payload.rules ?? []).map((rule: InstagramRule) => ({ ...rule, is_active: rule.is_active ?? true })));
+        const loadedRules = (payload.rules ?? []).map((rule: InstagramRule) => ({ ...rule, is_active: rule.is_active ?? true }));
+
+        // Load products for the product selector
+        try {
+          const { createClient } = await import('@/lib/supabase/client');
+          const supabase = createClient();
+          const { data: productsData, error: productsErr } = await supabase
+            .from('products')
+            .select('id, name, keyword')
+            .eq('account_id', accountId)
+            .order('created_at', { ascending: false });
+          if (productsErr) throw productsErr;
+          setProducts(productsData ?? []);
+        } catch (err) {
+          console.warn('[instagram-config] failed to load products for selector', err);
+          setProducts([]);
+        }
+
+        setRules(loadedRules);
       } catch (error) {
         console.error('[instagram-config] failed to load config:', error);
         toast.error('Failed to load Instagram configuration');
@@ -109,10 +134,14 @@ export function InstagramConfig() {
         match_type: matchType,
         trigger_type: triggerType,
         reply_text: '',
+        product_id: selectedProductId,
+        whatsapp_link: whatsappLinkInput?.trim() || null,
         is_active: true,
       },
     ]);
     setKeywordInput('');
+    setSelectedProductId(null);
+    setWhatsappLinkInput('');
   }
 
   function removeRule(index: number) {
@@ -210,6 +239,31 @@ export function InstagramConfig() {
                   </select>
                 </div>
 
+                <div className="space-y-2">
+                  <Label htmlFor="instagram-product">Product (optional)</Label>
+                  <select
+                    id="instagram-product"
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground"
+                    value={selectedProductId ?? ''}
+                    onChange={(e) => setSelectedProductId(e.target.value || null)}
+                  >
+                    <option value="">— none —</option>
+                    {products.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}{p.keyword ? ` — ${p.keyword}` : ''}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="instagram-whatsapp-link">WhatsApp link (optional)</Label>
+                  <Input
+                    id="instagram-whatsapp-link"
+                    value={whatsappLinkInput}
+                    onChange={(e) => setWhatsappLinkInput(e.target.value)}
+                    placeholder="https://wa.me/.. or custom link"
+                  />
+                </div>
+
                 <Button type="button" variant="secondary" onClick={addRule}>
                   Add rule
                 </Button>
@@ -224,14 +278,16 @@ export function InstagramConfig() {
                       <div>
                         <p className="font-medium">{rule.keyword}</p>
                         <p className="text-xs text-muted-foreground">
-                          {rule.match_type} · {rule.trigger_type}
-                        </p>
-                      </div>
-                      <Button type="button" variant="ghost" size="sm" onClick={() => removeRule(index)}>
-                        Remove
-                      </Button>
-                    </div>
-                  ))
+                         {rule.match_type} · {rule.trigger_type}{' '}
+                         {rule.product_id ? `· product: ${products.find((p) => p.id === rule.product_id)?.name ?? rule.product_id}` : ''}
+                         {rule.whatsapp_link ? ` · link: ${rule.whatsapp_link}` : ''}
+                       </p>
+                     </div>
+                     <Button type="button" variant="ghost" size="sm" onClick={() => removeRule(index)}>
+                       Remove
+                     </Button>
+                   </div>
+                 ))
                 )}
               </div>
             </div>
