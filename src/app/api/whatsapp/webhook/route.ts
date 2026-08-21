@@ -1,7 +1,7 @@
 import { NextResponse, after } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
-import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
+import { getMediaUrl, downloadMedia, sendMediaMessage } from '@/lib/whatsapp/meta-api'
 import { mirrorInboundMedia } from '@/lib/whatsapp/mirror-inbound-media'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
@@ -184,6 +184,67 @@ export async function POST(request: Request) {
   // Read raw body first so we can HMAC-verify the exact bytes Meta
   // signed. request.json() would re-encode and break the signature.
   const rawBody = await request.text()
+
+  // --- Stripe webhook handling (if Stripe posts here) ---
+  const stripeSig = request.headers.get('stripe-signature')
+  if (stripeSig) {
+    try {
+      const parsed = JSON.parse(rawBody)
+      const ev = parsed as any
+      // Handle checkout / payment succeeded events
+      if (ev && (ev.type === 'checkout.session.completed' || ev.type === 'payment_intent.succeeded')) {
+        const obj = ev.data?.object || {}
+        const metadata = obj.metadata || {}
+        const productId = metadata.product_id || metadata.product || null
+        const contactPhone = metadata.contact_phone || metadata.contactPhone || null
+        const accountId = metadata.account_id || metadata.account || null
+
+        if (productId && contactPhone) {
+          try {
+            const admin = supabaseAdmin()
+            const { data: product } = await admin.from('products').select('*').eq('id', productId).maybeSingle()
+            if (!product) {
+              console.warn('[stripe-webhook] product not found', productId)
+              return NextResponse.json({ ok: true })
+            }
+
+            const acct = accountId || product.account_id
+            if (!acct) {
+              console.warn('[stripe-webhook] cannot determine account for delivery')
+              return NextResponse.json({ ok: true })
+            }
+
+            const { data: waCfg } = await admin.from('whatsapp_config').select('phone_number_id, access_token').eq('account_id', acct).maybeSingle()
+            if (!waCfg) {
+              console.warn('[stripe-webhook] no whatsapp_config for account', acct)
+              return NextResponse.json({ ok: true })
+            }
+
+            const accessToken = decrypt(waCfg.access_token)
+            // Determine media kind from file extension (document) — use 'document' by default
+            const link = product.file_public_url || ''
+            const filename = product.file_path ? product.file_path.split('/').pop() : undefined
+            if (link) {
+              try {
+                await sendMediaMessage({ phoneNumberId: waCfg.phone_number_id, accessToken, to: contactPhone, kind: 'document', link, filename })
+                console.log('[stripe-webhook] delivered product', productId, 'to', contactPhone)
+              } catch (err) {
+                console.error('[stripe-webhook] failed to send media:', err)
+              }
+            }
+          } catch (err) {
+            console.error('[stripe-webhook] error delivering product:', err)
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[stripe-webhook] failed to parse or handle event:', err)
+    }
+
+    // Ack Stripe immediately
+    return NextResponse.json({ ok: true })
+  }
+
   const signature = request.headers.get('x-hub-signature-256')
 
   if (!verifyMetaWebhookSignature(rawBody, signature)) {

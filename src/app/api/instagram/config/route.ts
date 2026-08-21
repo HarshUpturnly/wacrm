@@ -25,11 +25,13 @@ function sanitizeRule(rule: Record<string, unknown>) {
     match_type: matchType,
     trigger_type: triggerType,
     reply_text: typeof rule.reply_text === 'string' ? rule.reply_text.trim() : '',
+    product_id: typeof rule.product_id === 'string' && rule.product_id ? rule.product_id : null,
+    whatsapp_link: typeof rule.whatsapp_link === 'string' && rule.whatsapp_link ? rule.whatsapp_link.trim() : null,
     is_active: rule.is_active !== false,
   };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const supabase = await createClient();
     const {
@@ -44,6 +46,23 @@ export async function GET() {
     const accountId = await resolveAccountId(supabase, user.id);
     if (!accountId) {
       return NextResponse.json({ config: null, rules: [] }, { status: 200 });
+    }
+
+    const url = new URL(request.url);
+    const action = url.searchParams.get('action');
+
+    // Support listing payment gateways when requested
+    if (action === 'list_gateways') {
+      const { data: gateways, error } = await supabase
+        .from('payment_gateways')
+        .select('id, provider, label, is_active, created_at, updated_at')
+        .eq('account_id', accountId)
+        .order('created_at', { ascending: false });
+      if (error) {
+        console.error('[instagram/config GET gateways] failed:', error);
+        return NextResponse.json({ error: 'Failed to load gateways' }, { status: 500 });
+      }
+      return NextResponse.json({ gateways: gateways ?? [] });
     }
 
     const { data: config } = await supabase
@@ -68,6 +87,8 @@ export async function GET() {
       rules: (rules ?? []).map((rule) => ({
         ...rule,
         reply_text: rule.reply_text ?? '',
+        product_id: rule.product_id ?? null,
+        whatsapp_link: rule.whatsapp_link ?? null,
       })),
     });
   } catch (error) {
@@ -94,6 +115,33 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
+    const action = typeof body?.action === 'string' ? body.action : '';
+
+    // Save a payment gateway (encrypted) — POST with { action: 'save_payment_gateway', provider, label, config }
+    if (action === 'save_payment_gateway') {
+      const provider = typeof body.provider === 'string' ? body.provider : '';
+      const label = typeof body.label === 'string' ? body.label : provider;
+      const cfg = typeof body.config === 'string' ? body.config : '';
+      if (!provider || !cfg) return NextResponse.json({ error: 'provider and config are required' }, { status: 400 });
+
+      try {
+        const encrypted = encrypt(cfg);
+        const { data: inserted, error: insertError } = await supabase
+          .from('payment_gateways')
+          .insert({ account_id: accountId, provider, label, config: encrypted, is_active: true })
+          .select('id, provider, label, is_active, created_at')
+          .single();
+        if (insertError || !inserted) {
+          console.error('[instagram/config POST gateway] insert failed:', insertError);
+          return NextResponse.json({ error: 'Failed to save gateway' }, { status: 500 });
+        }
+        return NextResponse.json({ gateway: inserted });
+      } catch (err) {
+        console.error('[instagram/config POST gateway] failed:', err);
+        return NextResponse.json({ error: 'Failed to save gateway' }, { status: 500 });
+      }
+    }
+
     const {
       business_account_id,
       access_token,
@@ -170,6 +218,8 @@ export async function POST(request: Request) {
         match_type: rule.match_type,
         trigger_type: rule.trigger_type,
         reply_text: rule.reply_text || null,
+        product_id: rule.product_id || null,
+        whatsapp_link: rule.whatsapp_link || null,
         is_active: rule.is_active,
       }));
 
