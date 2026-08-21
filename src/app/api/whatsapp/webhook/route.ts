@@ -185,77 +185,9 @@ export async function POST(request: Request) {
   // signed. request.json() would re-encode and break the signature.
   const rawBody = await request.text()
 
-  // --- Stripe webhook handling (if Stripe posts here) ---
-  const stripeSig = request.headers.get('stripe-signature')
-  if (stripeSig) {
-    try {
-      const parsed = JSON.parse(rawBody)
-      const ev: unknown = parsed
-      // Handle checkout / payment succeeded events — narrow unknown safely
-      if (typeof ev === 'object' && ev !== null) {
-        const evTyped = ev as { type?: string; data?: { object?: Record<string, unknown> } };
-        if (evTyped.type === 'checkout.session.completed' || evTyped.type === 'payment_intent.succeeded') {
-          const obj = evTyped.data?.object
-          // Safely extract metadata fields without using `any`.
-          const metadata: Record<string, string> = {}
-          if (obj && typeof obj === 'object') {
-            const potential = (obj as Record<string, unknown>)['metadata']
-            if (potential && typeof potential === 'object') {
-              for (const [k, v] of Object.entries(potential as Record<string, unknown>)) {
-                metadata[k] = v == null ? '' : String(v)
-              }
-            }
-          }
+  // Stripe webhook handling removed in this patch. Re-add with proper signature verification and tests if needed.
+  // (Previously: parsed Stripe checkout/payment events and attempted to deliver products via WhatsApp.)
 
-          const productId = metadata.product_id || metadata.product || null
-          const contactPhone = metadata.contact_phone || metadata.contactPhone || null
-          const accountId = metadata.account_id || metadata.account || null
-
-          if (productId && contactPhone) {
-            try {
-              const admin = supabaseAdmin()
-              const { data: product } = await admin.from('products').select('*').eq('id', productId).maybeSingle()
-              if (!product) {
-                console.warn('[stripe-webhook] product not found', productId)
-                return NextResponse.json({ ok: true })
-              }
-
-            const acct = accountId || product.account_id;
-            if (!acct) {
-              console.warn('[stripe-webhook] cannot determine account for delivery');
-              return NextResponse.json({ ok: true });
-            }
-
-            const { data: waCfg } = await admin.from('whatsapp_config').select('phone_number_id, access_token').eq('account_id', acct).maybeSingle()
-            if (!waCfg) {
-              console.warn('[stripe-webhook] no whatsapp_config for account', acct)
-              return NextResponse.json({ ok: true })
-            }
-
-            const accessToken = decrypt(waCfg.access_token)
-            // Determine media kind from file extension (document) — use 'document' by default
-            const link = product.file_public_url || ''
-            const filename = product.file_path ? product.file_path.split('/').pop() : undefined
-            if (link) {
-              try {
-                await sendMediaMessage({ phoneNumberId: waCfg.phone_number_id, accessToken, to: contactPhone, kind: 'document', link, filename })
-                console.log('[stripe-webhook] delivered product', productId, 'to', contactPhone)
-              } catch (err) {
-                console.error('[stripe-webhook] failed to send media:', err)
-              }
-            }
-          } catch (err) {
-            console.error('[stripe-webhook] error delivering product:', err)
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('[stripe-webhook] failed to parse or handle event:', err)
-    }
-
-    // Ack Stripe immediately
-    return NextResponse.json({ ok: true });
-  }
 
   const signature = request.headers.get('x-hub-signature-256');
 
